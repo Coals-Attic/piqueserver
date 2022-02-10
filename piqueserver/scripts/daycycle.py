@@ -18,7 +18,6 @@ from twisted.internet.task import LoopingCall
 from piqueserver.commands import command, admin
 from pyspades.color import wrap, interpolate_hsb, interpolate_rgb, hsb_to_rgb, rgb_distance
 
-S_NO_RIGHTS = 'No administrator rights!'
 S_TIME_OF_DAY = 'Time of day: {hours:02d}:{minutes:02d}'
 S_SPEED = 'Day cycle speed is {multiplier}'
 S_SPEED_SET = 'Day cycle speed changed to {multiplier}'
@@ -42,11 +41,9 @@ def day_speed(connection, value=None):
         return S_SPEED_SET.format(multiplier=value)
 
 
-@command('daytime')
+@command('daytime', admin_only=True)
 def day_time(connection, value=None):
     if value is not None:
-        if not connection.admin:
-            return S_NO_RIGHTS
         time = float(value)
         if time < 0.0:
             raise ValueError("Time cannot be < 0")

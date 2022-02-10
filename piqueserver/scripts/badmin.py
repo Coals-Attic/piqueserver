@@ -36,10 +36,10 @@ SCORE_AIMBOT_ENABLED = True
 SCORE_AIMBOT_UNCERTAIN = 2
 SCORE_AIMBOT_WARN = 5
 SCORE_AIMBOT_KICK = 15
-SCORE_AIMBOT_BAN = 25
+SCORE_AIMBOT_BAN = 15
 
 # Settings for auto-griefcheck
-SCORE_GRIEF_ENABLED = True
+SCORE_GRIEF_ENABLED = False
 # any votekicks under uncertain will be cancelled
 SCORE_GRIEF_UNCERTAIN = 2
 SCORE_GRIEF_WARN = 4
@@ -218,16 +218,17 @@ def apply_script(protocol, connection, config):
             punishment='warn',
             reason="Being a meany face"):
         connection.protocol.irc_say(
-            "* @Badmin: %s is being punished. Type: %s (Reason: %s)" %
+            "* %s is being punished. Type: %s (Reason: %s)" %
             (connection.name, punishment, reason))
         if punishment == "ban":
-            connection.ban('@Badmin: ' + reason,
+            connection.ban(reason,
                            connection.protocol.votekick_ban_duration)
         elif punishment == "kick":
-            connection.kick('@Badmin: ' + reason)
+            connection.kick(reason)
         elif punishment == "warn":
-            connection.protocol.send_chat(
-                " @Badmin: Hey %s, %s" % (connection.name, reason))
+            # Get the player and warn them
+            player = get_player(connection.protocol, connection.name)
+            player.send_chat("[Warning] " + reason);
 
     class BadminConnection(connection):
 
@@ -241,9 +242,9 @@ def apply_script(protocol, connection, config):
         def on_votekick_start(self, connection, player, reason=None):
             if reason is None and BLANK_VOTEKICK_ENABLED:
                 connection.protocol.irc_say(
-                    "* @Badmin: %s is attempting a blank votekick (against %s)" %
+                    "* %s is attempting a blank votekick (against %s)" %
                     (connection.name, player.name))
-                return "@Badmin: You must input a reason for the votekick (/votekick name reason)"
+                return "You must input a reason for the votekick (/votekick name reason)"
             # print "before aimbot check"
             # print player.ratio_kills/float(max(1,player.ratio_deaths))
             if aimbot_match(self, reason) and SCORE_AIMBOT_ENABLED:
@@ -254,8 +255,8 @@ def apply_script(protocol, connection, config):
                 # print "score: %s, acc: %s" % (score, percent)
                 if score >= SCORE_AIMBOT_BAN:
                     badmin_punish(
-                        player, "ban", "Suspected Aimbotting (Kicker: %s, KDR: %s, Hit Acc: %s)" %
-                        (connection.name, score, percent))
+                        player, "ban", "That's too many nice shots, %s was banned for aimbotting" %
+                        (connection.name))
                     return
                 if score >= SCORE_AIMBOT_KICK:
                     badmin_punish(
@@ -264,21 +265,21 @@ def apply_script(protocol, connection, config):
                     return
                 if score >= SCORE_AIMBOT_WARN:
                     badmin_punish(
-                        player, "warn", "People think you're aimbotting! (KDR: %s, Hit Acc: %s)" %
+                        player, "warn", "People think you're aimbotting, perhaps you're too good?" %
                         (score, percent))
                     return protocol.on_votekick_start(
                         self, connection, player, reason)
                 if score >= SCORE_AIMBOT_UNCERTAIN:
                     connection.protocol.irc_say(
-                        "* @Badmin: Aimbot vote: (KDR: %s, Hit Acc: %s)" %
+                        "* Aimbot vote: (KDR: %s, Hit Acc: %s)" %
                         (score, percent))
                     return protocol.on_votekick_start(
                         self, connection, player, reason)
                 if score < SCORE_AIMBOT_UNCERTAIN:
                     connection.protocol.irc_say(
-                        "* @Badmin: I've cancelled an aimbot votekick! Kicker: %s, Kickee: %s, KDR: %s, Hit Acc: %s" %
+                        "* I've cancelled an aimbot votekick! Kicker: %s, Kickee: %s, KDR: %s, Hit Acc: %s" %
                         (connection.name, player.name, score, percent))
-                    return "@Badmin: This player is not aimbotting."
+                    return "This player is not aimbotting, their accuracy is too bad."
                     # print "went too far (aimbot)"
             if grief_match(self, reason) and SCORE_GRIEF_ENABLED:
                 # print "made grief check"
@@ -300,14 +301,14 @@ def apply_script(protocol, connection, config):
                         self, connection, player, reason)
                 if score >= SCORE_GRIEF_UNCERTAIN:
                     connection.protocol.irc_say(
-                        "* @Badmin: Grief Score: %s" % score)
+                        "* Grief Score: %s" % score)
                     return protocol.on_votekick_start(
                         self, connection, player, reason)
                 if score < SCORE_GRIEF_UNCERTAIN:
                     connection.protocol.irc_say(
-                        "* @Badmin: I've cancelled a griefing votekick! Kicker: %s, Kickee: %s, Score: %s" %
+                        "* I've cancelled a griefing votekick! Kicker: %s, Kickee: %s, Score: %s" %
                         (connection.name, player.name, score))
-                    return "@Badmin: This player has not been griefing."
+                    return "This player has not been griefing."
             return protocol.on_votekick_start(self, connection, player, reason)
 
     return BadminProtocol, BadminConnection

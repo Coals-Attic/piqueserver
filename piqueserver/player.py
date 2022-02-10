@@ -15,12 +15,12 @@ from pyspades.types import AttributeSet, RateLimiter
 from pyspades.team import Team
 from pyspades.world import Grenade
 CHAT_WINDOW_SIZE = 5
-CHAT_PER_SECOND = 0.5
+CHAT_PER_SECOND = 2
 
 HookValue = Optional[bool]
 
 log = Logger()
-
+BannedAttempts = {}
 
 class FeatureConnection(ServerConnection):
     def __init__(self, *args, **kwargs):
@@ -51,8 +51,8 @@ class FeatureConnection(ServerConnection):
         protocol = self.protocol
         client_ip = self.address[0]
 
-        if client_ip in self.protocol.bans:
-            name, reason, timestamp = self.protocol.bans[client_ip]
+        if client_ip in protocol.bans:
+            name, reason, timestamp = protocol.bans[client_ip]
 
             if timestamp is not None and reactor.seconds() >= timestamp:
                 protocol.remove_ban(client_ip)
@@ -60,10 +60,35 @@ class FeatureConnection(ServerConnection):
             else:
                 log.info('banned user {} ({}) attempted to join'.format(name,
                                                                         client_ip))
+
+                BannedAttempts[client_ip] = BannedAttempts.get(client_ip, 0) + 1
+
+                # If attempts arent more than 3, log the attempt
+                if BannedAttempts[client_ip] <= 3:
+                    should_humilliate = False
+
+                    if BannedAttempts[client_ip] == 3:
+                        should_humilliate = True
+
+                    protocol.send_chat(
+                    'Banned user %s attempted to join%s' % (
+                        self.name,
+                        # Yeah I dislike dumb people
+                        "" if should_humilliate == False else " for the 3rd time"
+                        ),
+                    irc=True)
+
+                    if should_humilliate:
+                        protocol.send_chat(
+                        "Don't worry %s, you'll be banned for a while" % (
+                            self.name
+                        ),
+                        irc=True)
+
                 self.disconnect(ERROR_BANNED)
                 return
 
-        manager = self.protocol.ban_manager
+        manager = protocol.ban_manager
 
         if manager is not None:
             reason = manager.get_ban(client_ip)
@@ -72,6 +97,7 @@ class FeatureConnection(ServerConnection):
                           'banned for %r') % (client_ip, reason))
                 self.disconnect(ERROR_BANNED)
                 return
+
 
         ServerConnection.on_connect(self)
 
@@ -110,6 +136,8 @@ class FeatureConnection(ServerConnection):
             self.protocol.player_memory.append((self.name, self.address[0]))
         else:
             log.info('{ip} disconnected', ip=self.address[0])
+
+        self.protocol.send_chat('%s is no longer in the game' % (self.name), irc=True)
         ServerConnection.on_disconnect(self)
 
     def on_command(self, command: str, parameters: List[str]) -> None:
@@ -117,7 +145,7 @@ class FeatureConnection(ServerConnection):
 
         if result:
             for i in reversed(result.split("\n")):
-                self.send_chat(i)
+                self.send_chat("[%s] %s" % (command, i))
 
     def _can_build(self) -> bool:
         if not self.building:
@@ -190,20 +218,20 @@ class FeatureConnection(ServerConnection):
                _type: int, grenade: Grenade) -> HookValue:
         if not self.protocol.killing:
             self.send_chat(
-                "You can't kill anyone right now! Damage is turned OFF")
+                "[Info] You can't kill anyone right now! Damage is turned OFF")
             return False
         if not self.killing:
-            self.send_chat("%s. You can't kill anyone." % player.name)
+            self.send_chat("[Info] %s. You can't kill anyone." % player.name)
             return False
         elif player.god:
             if not player.invisible:
-                self.send_chat("You can't hurt %s! That player is in "
+                self.send_chat("[Info] You can't hurt %s! That player is in "
                                "*god mode*" % player.name)
             return False
         if self.god:
-            self.protocol.send_chat('%s, killing in god mode is forbidden!' %
+            self.protocol.send_chat('[Info] %s, killing in god mode is forbidden!' %
                                     self.name, irc=True)
-            self.protocol.send_chat('%s returned to being a mere human.' %
+            self.protocol.send_chat('[Info] %s returned to being a mere human.' %
                                     self.name, irc=True)
             self.god = False
             self.god_build = False
@@ -218,11 +246,25 @@ class FeatureConnection(ServerConnection):
             # explosions)
             killer.streak += 1
             killer.best_streak = max(killer.streak, killer.best_streak)
+
+        if killer.streak % 5 == 0 and killer.streak >= 10:
+            self.protocol.send_chat(
+            '%s has a %d kills streak!' % (
+                self.name, killer.streak),
+            irc=True)
+
         killer.team.kills += 1
 
     def on_reset(self) -> None:
+        if self.streak >= 10:
+            self.protocol.send_chat(
+            '%s got killed and lost their streak' % (
+                self.name),
+            irc=True)
+
         self.streak = 0
         self.best_streak = 0
+
 
     def on_animation_update(self, jump: bool, crouch: bool, sneak: bool,
                             sprint: bool) -> Tuple[bool, bool, bool, bool]:
@@ -246,15 +288,15 @@ class FeatureConnection(ServerConnection):
                 teamswitch_interval = self.protocol.teamswitch_interval
                 teamswitch_allowed = self.protocol.teamswitch_allowed
                 if not teamswitch_allowed:
-                    self.send_chat('Switching teams is not allowed')
+                    self.send_chat('[Info] Switching teams is not allowed')
                     return False
                 if (self.last_switch is not None and
                         reactor.seconds() - self.last_switch < teamswitch_interval):
                     self.send_chat(
-                        'You must wait before switching teams again')
+                        '[Info] You must wait before switching teams again')
                     return False
         if team.locked:
-            self.send_chat('Team is locked')
+            self.send_chat('[Info] Team is locked')
             if not team.spectator and not team.other.locked:
                 return team.other
             return False
@@ -264,7 +306,7 @@ class FeatureConnection(ServerConnection):
             if other_team.count() < team.count() + 1 - balanced_teams:
                 if other_team.locked:
                     return False
-                self.send_chat('Team is full, moved to %s' % other_team.name)
+                self.send_chat('[Info] That team is full, moving to the other team %s' % other_team.name)
                 return other_team
         self.last_switch = reactor.seconds()
 
@@ -277,8 +319,8 @@ class FeatureConnection(ServerConnection):
         message = '<{}> {}'.format(self.name, value)
 
         if self.mute:
-            message = '(MUTED) {}'.format(message)
-            self.send_chat('(Chat not sent - you are muted)')
+            message = '[Muted] {}'.format(message)
+            self.send_chat(message)
             return False
 
         if global_message:
@@ -295,7 +337,7 @@ class FeatureConnection(ServerConnection):
         if self.chat_limiter.above_limit():
             self.mute = True
             self.protocol.send_chat(
-                '%s has been muted for excessive spam' % (
+                '%s has been muted for spamming.' % (
                     self.name),
                 irc=True)
 
@@ -307,9 +349,10 @@ class FeatureConnection(ServerConnection):
     def kick(self, reason=None, silent=False):
         if not silent:
             if reason is not None:
-                message = '{} was kicked: {}'.format(self.name, reason)
+                message = '{} just got kicked. Reason: {}'.format(self.name, reason)
             else:
-                message = '%s was kicked' % self.name
+                message = '%s was kicked.' % self.name
+
             self.protocol.send_chat(message, irc=True)
             log.info(message)
         # FIXME: Client should handle disconnect events the same way in both
@@ -317,19 +360,20 @@ class FeatureConnection(ServerConnection):
         self.disconnect(ERROR_KICKED)
 
     def ban(self, reason=None, duration=None):
-        reason = ': ' + reason if reason is not None else ''
         duration = duration or None
-        if duration is None:
-            message = '{} permabanned{}'.format(self.name, reason)
-        else:
-            message = '{} banned for {}{}'.format(self.name,
-                                                  prettify_timespan(duration), reason)
+
         if self.protocol.on_ban_attempt(self, reason, duration):
-            self.protocol.send_chat(message, irc=True)
             self.protocol.on_ban(self, reason, duration)
             if self.address[0] == "127.0.0.1":
-                self.protocol.send_chat("Ban ignored: localhost")
+                self.protocol.send_chat("Almost banned %s, too bad they're the server owner" % self.name, irc=True)
             else:
+                if duration is None:
+                    message = 'Pay respect to {} who just got permabanned for {}'.format(self.name, reason)
+                else:
+                    message = 'We won\'t hear of {} for some time (Banned for {}: {})'.format(self.name,
+                                                        prettify_timespan(duration), reason)
+
+                self.protocol.send_chat(message, irc=True)
                 self.protocol.add_ban(self.address[0], reason, duration,
                                       self.name)
 
@@ -340,7 +384,7 @@ class FeatureConnection(ServerConnection):
             current_time += 2
 
     def on_hack_attempt(self, reason):
-        log.warn('Hack attempt detected from {}: {}'.format(self.printable_name,
+        log.warn('There (maybe) is a lame cheater: {}: {}'.format(self.printable_name,
                                                             reason))
         self.kick(reason)
 
