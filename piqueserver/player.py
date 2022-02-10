@@ -137,7 +137,6 @@ class FeatureConnection(ServerConnection):
         else:
             log.info('{ip} disconnected', ip=self.address[0])
 
-        self.protocol.send_chat('%s is no longer in the game' % (self.name), irc=True)
         ServerConnection.on_disconnect(self)
 
     def on_command(self, command: str, parameters: List[str]) -> None:

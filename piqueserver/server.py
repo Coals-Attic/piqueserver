@@ -635,8 +635,8 @@ class FeatureProtocol(ServerProtocol):
 
         # send shutdown notification
         log.info("disconnecting players")
-        self.broadcast_chat("Server shutting down in 30 seconds.")
-        for i in range(30, 0, -1):
+        self.broadcast_chat("Server restarting in 5 seconds.")
+        for i in range(5, 0, -1):
             self.broadcast_chat(str(i)+"...")
             await sleep(1)
 
